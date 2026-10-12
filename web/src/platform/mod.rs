@@ -1,6 +1,7 @@
 use crate::WHATWGOffscreenKernelEnvironment;
 
 pub mod http_client;
+pub mod pmtiles;
 
 #[cfg(target_feature = "atomics")]
 pub mod multithreaded;
