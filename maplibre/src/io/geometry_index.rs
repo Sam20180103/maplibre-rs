@@ -223,6 +223,9 @@ impl GeomProcessor for IndexProcessor {
     fn multipoint_begin(&mut self, size: usize, idx: usize) -> Result<(), GeozeroError> {
         self.geo_writer.multipoint_begin(size, idx)
     }
+    fn multipoint_end(&mut self, idx: usize) -> Result<(), GeozeroError> {
+        self.geo_writer.multipoint_end(idx)
+    }
     fn linestring_begin(
         &mut self,
         tagged: bool,
@@ -327,5 +330,35 @@ impl FeatureProcessor for IndexProcessor {
         };
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use geozero::{FeatureProcessor, GeomProcessor};
+
+    use super::IndexProcessor;
+
+    #[test]
+    fn multipoint_followed_by_linestring() {
+        let mut index = IndexProcessor::new();
+
+        index.properties_begin().unwrap();
+        index.geometry_begin().unwrap();
+        index.multipoint_begin(1, 0).unwrap();
+        index.xy(0.0, 0.0, 0).unwrap();
+        index.multipoint_end(0).unwrap();
+        index.geometry_end().unwrap();
+
+        index.properties_begin().unwrap();
+        index.geometry_begin().unwrap();
+        index.linestring_begin(true, 2, 0).unwrap();
+        index.xy(0.0, 0.0, 0).unwrap();
+        index.xy(1.0, 1.0, 1).unwrap();
+        index.linestring_end(true, 0).unwrap();
+        index.geometry_end().unwrap();
+
+        // MultiPoints are not indexed; the LineString must be.
+        assert_eq!(index.get_geometries().len(), 1);
     }
 }
