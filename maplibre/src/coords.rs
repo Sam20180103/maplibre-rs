@@ -490,6 +490,16 @@ impl WorldTileCoords {
     }
 
     /// Get the tile which is one zoom level lower and contains this one
+    /// The tile at zoom level `z` (at most this tile's zoom level) that contains this tile.
+    pub fn ancestor(&self, z: u8) -> WorldTileCoords {
+        let levels = u8::from(self.z) - z;
+        WorldTileCoords {
+            x: self.x >> levels,
+            y: self.y >> levels,
+            z: z.into(),
+        }
+    }
+
     pub fn get_parent(&self) -> Option<WorldTileCoords> {
         if self.z.is_root() {
             return None;

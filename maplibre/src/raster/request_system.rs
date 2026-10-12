@@ -1,6 +1,6 @@
 //! Requests tiles which are currently in view
 
-use std::{borrow::Cow, collections::HashSet, marker::PhantomData, rc::Rc};
+use std::{borrow::Cow, marker::PhantomData, rc::Rc};
 
 use crate::{
     context::MapContext,
@@ -11,12 +11,13 @@ use crate::{
     },
     kernel::Kernel,
     raster::{
+        is_raster_layer,
         process_raster::{process_raster_tile, ProcessRasterContext, RasterTileRequest},
         transferables::{LayerRasterMissing, RasterTransferables},
         RasterLayersDataComponent,
     },
     render::{tile_view_pattern::DEFAULT_TILE_SIZE, view_state::ViewStatePadding},
-    style::layer::LayerPaint,
+    style::source::Source,
     tcs::system::{System, SystemResult},
 };
 
@@ -52,6 +53,10 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
             ViewStatePadding::Loose,
         );
+
+        if !style.layers.iter().any(is_raster_layer) {
+            return Ok(());
+        }
 
         if view_state.did_camera_change() || view_state.did_zoom_change() {
             if let Some(view_region) = &view_region {
@@ -100,8 +105,6 @@ impl<E: Environment, T: RasterTransferables> System for RequestSystem<E, T> {
             }
         }
 
-        view_state.update_references();
-
         Ok(())
     }
 }
@@ -115,42 +118,50 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
             return Err(ProcedureError::IncompatibleInput);
         };
 
-        let raster_layers: HashSet<String> = style
-            .layers
-            .iter()
-            .filter_map(|layer| {
-                if matches!(layer.paint, Some(LayerPaint::Raster(_))) {
-                    layer.source_layer.clone()
-                } else {
-                    None
-                }
-            })
-            .collect();
-
         let client = kernel.source_client();
 
-        if !raster_layers.is_empty() {
-            let context = context.clone();
-            let source = SourceType::Raster(RasterSource::default());
+        for layer in style.layers.iter().filter(|layer| is_raster_layer(layer)) {
+            let (source, max_zoom) = match &layer.source {
+                None => (Some(SourceType::Raster(RasterSource::default())), None),
+                Some(id) => match style.sources.get(id) {
+                    Some(Source::Raster(source)) => {
+                        (SourceType::from_style_source(source), source.maxzoom)
+                    }
+                    _ => (None, None),
+                },
+            };
+            // Beyond the source's max zoom, crop the tile out of its ancestor at max zoom.
+            let data_zoom = max_zoom.filter(|&max| max < u8::from(coords.z));
+            let fetch_coords = data_zoom.map_or(coords, |max| coords.ancestor(max));
+            let Some(source) = source else {
+                log::warn!("raster layer {} has no raster source with tiles", layer.id);
+                continue;
+            };
 
-            match client.fetch(&coords, &source).await {
-                Ok(data) => {
-                    let data = data.into_boxed_slice();
-
-                    let mut process_context = ProcessRasterContext::<T, C>::new(context);
-
-                    process_raster_tile(&data, RasterTileRequest { coords }, &mut process_context)
-                        .map_err(|e| ProcedureError::Execution(Box::new(e)))?;
+            // `None`: no tile here (an empty response, e.g. outside an offline archive).
+            let result = match client.fetch(&fetch_coords, &source).await {
+                Ok(data) if data.is_empty() => Err(None),
+                Ok(data) => process_raster_tile(
+                    &data,
+                    RasterTileRequest {
+                        coords,
+                        layer: layer.id.clone(),
+                        data_zoom,
+                    },
+                    &mut ProcessRasterContext::<T, C>::new(context.clone()),
+                )
+                .map_err(|e| Some(format!("{e:?}"))),
+                Err(e) => Err(Some(format!("{e:?}"))),
+            };
+            if let Err(error) = result {
+                if let Some(e) = error {
+                    log::error!("raster tile {coords} of layer {} failed: {e}", layer.id);
                 }
-                Err(e) => {
-                    log::error!("{e:?}");
-
-                    context
-                        .send_back(<T as RasterTransferables>::LayerRasterMissing::build_from(
-                            coords,
-                        ))
-                        .map_err(ProcedureError::Send)?;
-                }
+                context
+                    .send_back(<T as RasterTransferables>::LayerRasterMissing::build_from(
+                        coords,
+                    ))
+                    .map_err(ProcedureError::Send)?;
             }
         }
 

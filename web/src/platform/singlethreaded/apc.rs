@@ -92,6 +92,8 @@ impl Context for PassingContext {
         let message = message.into();
         let tag = if WebMessageTag::LayerRaster.dyn_clone().as_ref() == message.tag() {
             &WebMessageTag::LayerRaster
+        } else if WebMessageTag::LayerRasterMissing.dyn_clone().as_ref() == message.tag() {
+            &WebMessageTag::LayerRasterMissing
         } else if WebMessageTag::LayerTessellated.dyn_clone().as_ref() == message.tag() {
             &WebMessageTag::LayerTessellated
         } else if WebMessageTag::TileTessellated.dyn_clone().as_ref() == message.tag() {

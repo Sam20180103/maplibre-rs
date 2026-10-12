@@ -1,4 +1,7 @@
-use crate::{coords::WorldTileCoords, style::source::TileAddressingScheme};
+use crate::{
+    coords::WorldTileCoords,
+    style::source::{TileAddressingScheme, VectorSource},
+};
 
 /// Represents a source from which the vector tile are fetched.
 #[derive(Clone)]
@@ -81,13 +84,67 @@ impl Default for RasterSource {
 pub enum SourceType {
     Raster(RasterSource),
     Tessellate(TessellateSource),
+    /// Tile URL templates from a style source's `tiles`, e.g. `https://example.com/{z}/{x}/{y}.pbf`.
+    Template {
+        tiles: Vec<String>,
+        scheme: TileAddressingScheme,
+    },
 }
 
 impl SourceType {
+    /// A template source from a style source, or `None` if it lists no tile URLs.
+    pub fn from_style_source(source: &VectorSource) -> Option<Self> {
+        let tiles = source.tiles.clone().filter(|tiles| !tiles.is_empty())?;
+        Some(SourceType::Template {
+            tiles,
+            scheme: source.scheme.clone().unwrap_or_default(),
+        })
+    }
+
     pub fn format(&self, coords: &WorldTileCoords) -> String {
         match self {
             SourceType::Raster(raster_source) => raster_source.format(coords),
             SourceType::Tessellate(tessellate_source) => tessellate_source.format(coords),
+            SourceType::Template { tiles, scheme } => {
+                let tile = coords.into_tile(scheme.clone()).unwrap();
+                // Spread requests over the listed hosts, like MapLibre GL JS.
+                let template = &tiles[(tile.x + tile.y) as usize % tiles.len()];
+                template
+                    .replace("{z}", &tile.z.to_string())
+                    .replace("{x}", &tile.x.to_string())
+                    .replace("{y}", &tile.y.to_string())
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::coords::ZoomLevel;
+
+    #[test]
+    fn template_fills_placeholders_and_spreads_hosts() {
+        let source = SourceType::Template {
+            tiles: vec![
+                "https://a.example/{z}/{x}/{y}.pbf".to_string(),
+                "https://b.example/vt?x={x}&y={y}&z={z}".to_string(),
+            ],
+            scheme: TileAddressingScheme::XYZ,
+        };
+        let coords: WorldTileCoords = (2, 1, ZoomLevel::new(3)).into();
+        assert_eq!(source.format(&coords), "https://b.example/vt?x=2&y=1&z=3");
+        let coords: WorldTileCoords = (2, 2, ZoomLevel::new(3)).into();
+        assert_eq!(source.format(&coords), "https://a.example/3/2/2.pbf");
+    }
+
+    #[test]
+    fn template_flips_y_for_tms() {
+        let source = SourceType::Template {
+            tiles: vec!["{z}/{x}/{y}".to_string()],
+            scheme: TileAddressingScheme::TMS,
+        };
+        let coords: WorldTileCoords = (0, 0, ZoomLevel::new(1)).into();
+        assert_eq!(source.format(&coords), "1/0/1");
     }
 }
