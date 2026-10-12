@@ -40,7 +40,9 @@ web-sys = { workspace = true, features = [
     "Window",
     "Worker", "WorkerGlobalScope", "DedicatedWorkerGlobalScope", "MessageEvent",
     "Request", "RequestInit", "RequestMode", "Response", "Headers",
-    "ErrorEvent"
+    "ErrorEvent",
+    "Blob", "File", "FileSystemDirectoryHandle", "FileSystemFileHandle", "StorageManager",
+    "WorkerNavigator"
 ] }
 js-sys.workspace = true
 wasm-bindgen.workspace = true
