@@ -121,26 +121,32 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
         let client = kernel.source_client();
 
         for layer in style.layers.iter().filter(|layer| is_raster_layer(layer)) {
-            let source = match &layer.source {
-                None => Some(SourceType::Raster(RasterSource::default())),
+            let (source, max_zoom) = match &layer.source {
+                None => (Some(SourceType::Raster(RasterSource::default())), None),
                 Some(id) => match style.sources.get(id) {
-                    Some(Source::Raster(source)) => SourceType::from_style_source(source),
-                    _ => None,
+                    Some(Source::Raster(source)) => {
+                        (SourceType::from_style_source(source), source.maxzoom)
+                    }
+                    _ => (None, None),
                 },
             };
+            // Beyond the source's max zoom, crop the tile out of its ancestor at max zoom.
+            let data_zoom = max_zoom.filter(|&max| max < u8::from(coords.z));
+            let fetch_coords = data_zoom.map_or(coords, |max| coords.ancestor(max));
             let Some(source) = source else {
                 log::warn!("raster layer {} has no raster source with tiles", layer.id);
                 continue;
             };
 
             // `None`: no tile here (an empty response, e.g. outside an offline archive).
-            let result = match client.fetch(&coords, &source).await {
+            let result = match client.fetch(&fetch_coords, &source).await {
                 Ok(data) if data.is_empty() => Err(None),
                 Ok(data) => process_raster_tile(
                     &data,
                     RasterTileRequest {
                         coords,
                         layer: layer.id.clone(),
+                        data_zoom,
                     },
                     &mut ProcessRasterContext::<T, C>::new(context.clone()),
                 )

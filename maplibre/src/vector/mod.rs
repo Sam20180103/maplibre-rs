@@ -32,6 +32,7 @@ use crate::{
 };
 
 mod populate_world_system;
+mod overzoom;
 mod process_vector;
 mod queue_system;
 mod render_commands;

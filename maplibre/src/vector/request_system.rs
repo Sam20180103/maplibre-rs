@@ -24,6 +24,7 @@ use crate::{
     },
     tcs::system::{System, SystemResult},
     vector::{
+        overzoom::overzoom_mvt,
         process_vector::{process_vector_tile, ProcessVectorContext, VectorTileRequest},
         transferables::{LayerMissing, VectorTransferables},
         VectorLayerBucketComponent,
@@ -137,11 +138,18 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
 
         let client = kernel.source_client();
 
-        for (source, requested_layers) in vector_sources(&style) {
+        for (source, max_zoom, requested_layers) in vector_sources(&style) {
             let context = context.clone();
-            match client.fetch(&coords, &source).await {
+            // Beyond the source's max zoom, cut the tile out of its ancestor at max zoom.
+            let max_zoom = max_zoom.filter(|&max| max < u8::from(coords.z));
+            let fetch_coords = max_zoom.map_or(coords, |max| coords.ancestor(max));
+            match client.fetch(&fetch_coords, &source).await {
                 Ok(data) => {
-                    let data = data.into_boxed_slice();
+                    let data = match max_zoom {
+                        Some(max) if !data.is_empty() => overzoom_mvt(&data, coords, max)
+                            .map_err(|e| ProcedureError::Execution(Box::new(e)))?,
+                        _ => data,
+                    };
 
                     let mut pipeline_context = ProcessVectorContext::<T, C>::new(context);
                     process_vector_tile(
@@ -181,7 +189,7 @@ fn is_vector_layer(layer: &StyleLayer) -> bool {
 
 /// Groups the style's vector layers by the tile source they are fetched from. Layers without a
 /// `source` use the default source.
-fn vector_sources(style: &Style) -> Vec<(SourceType, HashSet<StyleLayer>)> {
+fn vector_sources(style: &Style) -> Vec<(SourceType, Option<u8>, HashSet<StyleLayer>)> {
     let mut groups: HashMap<Option<&str>, HashSet<StyleLayer>> = HashMap::new();
     for layer in style.layers.iter().filter(|layer| is_vector_layer(layer)) {
         groups
@@ -193,17 +201,19 @@ fn vector_sources(style: &Style) -> Vec<(SourceType, HashSet<StyleLayer>)> {
     groups
         .into_iter()
         .filter_map(|(source_id, layers)| {
-            let source = match source_id {
-                None => SourceType::Tessellate(TessellateSource::default()),
+            let (source, max_zoom) = match source_id {
+                None => (SourceType::Tessellate(TessellateSource::default()), None),
                 Some(id) => match style.sources.get(id) {
-                    Some(Source::Vector(source)) => SourceType::from_style_source(source)?,
+                    Some(Source::Vector(source)) => {
+                        (SourceType::from_style_source(source)?, source.maxzoom)
+                    }
                     _ => {
                         log::warn!("vector layers use source {id}, which is not a vector source with tiles");
                         return None;
                     }
                 },
             };
-            Some((source, layers))
+            Some((source, max_zoom, layers))
         })
         .collect()
 }
