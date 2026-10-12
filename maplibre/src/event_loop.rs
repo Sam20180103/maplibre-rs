@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 use crate::{
+    context::MapContext,
     environment::Environment,
     map::Map,
     window::{HeadedMapWindow, MapWindowConfig},
@@ -39,4 +40,14 @@ pub trait EventLoop<ET: 'static + PartialEq> {
         <E::MapWindowConfig as MapWindowConfig>::MapWindow: HeadedMapWindow;
 
     fn create_proxy(&self) -> Self::EventLoopProxy;
+}
+
+/// A user event sent to the map through an [`EventLoopProxy`]. The event loop applies it to the
+/// map context before the next frame, which lets embedders control the map from outside the loop.
+pub trait MapEvent: 'static {
+    fn apply(self, context: &mut MapContext);
+}
+
+impl MapEvent for () {
+    fn apply(self, _context: &mut MapContext) {}
 }

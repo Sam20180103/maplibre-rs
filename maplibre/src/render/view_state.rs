@@ -6,7 +6,7 @@ use std::{
 use cgmath::{prelude::*, *};
 
 use crate::{
-    coords::{ViewRegion, WorldCoords, Zoom, ZoomLevel},
+    coords::{LatLon, ViewRegion, WorldCoords, Zoom, ZoomLevel},
     render::camera::{
         Camera, EdgeInsets, InvertedViewProjection, Perspective, ViewProjection, FLIP_Y,
         OPENGL_TO_WGPU_MATRIX,
@@ -204,6 +204,14 @@ impl ViewState {
     pub fn update_zoom(&mut self, new_zoom: Zoom) {
         *self.zoom = new_zoom;
         log::info!("zoom: {new_zoom}");
+    }
+
+    /// Centers the camera on `lat_lon` at `zoom`.
+    pub fn jump_to(&mut self, lat_lon: LatLon, zoom: Zoom) {
+        let position = WorldCoords::from_lat_lon(lat_lon, zoom);
+        self.update_zoom(zoom);
+        self.camera_mut()
+            .move_to(Point2::new(position.x, position.y));
     }
 
     pub fn camera(&self) -> &Camera {

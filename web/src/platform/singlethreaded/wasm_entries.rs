@@ -110,3 +110,36 @@ pub fn singlethreaded_receive_data(
 
     Ok(())
 }
+
+/// Creates the `new_worker` function expected by [`crate::run_map`]: each call starts a module
+/// worker from `script_url` and forwards the worker's messages to [`singlethreaded_receive_data`].
+///
+/// The worker script has to load this same wasm module (it receives it in a `wasm_init` message)
+/// and dispatch `kernel_config` and `call` messages to [`set_kernel_config`] and
+/// [`singlethreaded_process_data`], like `web/lib/src/singlethreaded/pool.worker.ts`.
+pub fn worker_factory(script_url: &str) -> js_sys::Function {
+    let script_url = script_url.to_owned();
+    let new_worker = move |received_ptr: u32| -> Result<web_sys::Worker, JsValue> {
+        let options = web_sys::WorkerOptions::new();
+        options.set_type(web_sys::WorkerType::Module);
+        let worker = web_sys::Worker::new_with_options(&script_url, &options)?;
+
+        let on_message =
+            Closure::<dyn Fn(web_sys::MessageEvent)>::new(move |event: web_sys::MessageEvent| {
+                let data: js_sys::Array = event.data().unchecked_into();
+                let tag = data.get(0).as_f64().unwrap_or_default() as u32;
+                let buffer: js_sys::ArrayBuffer = data.get(1).unchecked_into();
+                if let Err(e) =
+                    singlethreaded_receive_data(received_ptr as *const ReceivedType, tag, buffer)
+                {
+                    log::error!("failed to receive data from worker: {e:?}");
+                }
+            });
+        worker.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+        on_message.forget(); // Lives as long as the worker, i.e. the map.
+        Ok(worker)
+    };
+    Closure::<dyn Fn(u32) -> Result<web_sys::Worker, JsValue>>::new(new_worker)
+        .into_js_value()
+        .unchecked_into()
+}
