@@ -15,7 +15,9 @@ authors.workspace = true
 [features]
 web-webgl = ["maplibre/web-webgl"]
 trace = ["maplibre/trace", "tracing-wasm"]
-default = []
+default = ["debug-overlay"]
+# In debug builds, draw tile boundaries (DebugPlugin).
+debug-overlay = []
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = true
