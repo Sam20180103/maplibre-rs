@@ -16,6 +16,9 @@ pub struct RasterResources {
     msaa: Msaa,
     pipeline: wgpu::RenderPipeline,
     bound_textures: HashMap<WorldTileCoords, wgpu::BindGroup>,
+    /// Whether the style has raster layers. Without them, raster data never arrives, and tiles
+    /// must not wait for it.
+    pub active: bool,
 }
 
 impl RasterResources {
@@ -34,6 +37,7 @@ impl RasterResources {
             msaa,
             pipeline,
             bound_textures: Default::default(),
+            active: false,
         }
     }
 
@@ -86,6 +90,6 @@ impl RasterResources {
 
 impl HasTile for RasterResources {
     fn has_tile(&self, coords: WorldTileCoords, _world: &World) -> bool {
-        self.bound_textures.contains_key(&coords)
+        !self.active || self.bound_textures.contains_key(&coords)
     }
 }
