@@ -69,6 +69,7 @@ log.workspace = true
 bytemuck.workspace = true
 bytemuck_derive.workspace = true
 thiserror.workspace = true
+flate2.workspace = true
 
 # Static tiles inclusion
 include_dir.workspace = true
@@ -100,3 +101,6 @@ guillotiere = "0.6.2"
 [build-dependencies]
 maplibre-build-tools = { path = "../maplibre-build-tools", version = "0.1.0" }
 prost-build = "0.13.1"
+
+[dev-dependencies]
+pmtiles = { version = "0.24", default-features = false, features = ["write"] }

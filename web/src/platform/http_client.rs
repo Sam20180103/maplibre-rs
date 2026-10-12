@@ -65,8 +65,10 @@ impl Clone for WHATWGFetchHttpClient {
 #[async_trait(?Send)]
 impl HttpClient for WHATWGFetchHttpClient {
     async fn fetch(&self, url: &str) -> Result<Vec<u8>, SourceFetchError> {
-        self.fetch_bytes(url)
-            .await
-            .map_err(|e| SourceFetchError(Box::new(e)))
+        match url.strip_prefix(super::pmtiles::SCHEME) {
+            Some(path) => super::pmtiles::fetch(path).await,
+            None => self.fetch_bytes(url).await,
+        }
+        .map_err(|e| SourceFetchError(Box::new(e)))
     }
 }
