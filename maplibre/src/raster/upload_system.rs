@@ -90,7 +90,9 @@ fn upload_raster_layer(
             let texture = raster_resources.create_texture(
                 None,
                 device,
-                wgpu::TextureFormat::Rgba8UnormSrgb,
+                // Not sRGB: tiles are drawn to a non-sRGB view, so the bytes must pass through
+                // unconverted, like the CSS colors of vector layers.
+                wgpu::TextureFormat::Rgba8Unorm,
                 width,
                 height,
                 wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
