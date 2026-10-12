@@ -15,11 +15,21 @@ use crate::{
     },
 };
 
-pub fn queue_system(MapContext { world, style, .. }: &mut MapContext) -> SystemResult {
+pub fn queue_system(
+    MapContext {
+        world,
+        style,
+        view_state,
+        ..
+    }: &mut MapContext,
+) -> SystemResult {
     // Tiles hold a single raster texture, drawn at the first raster layer's position.
     let Some(raster_layer) = style.layers.iter().find(|layer| is_raster_layer(layer)) else {
         return Ok(());
     };
+    if !raster_layer.visible_at(view_state.zoom().level()) {
+        return Ok(());
+    }
 
     let Some((Initialized(tile_view_pattern),)) = world
         .resources

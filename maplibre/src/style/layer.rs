@@ -389,6 +389,14 @@ pub struct StyleLayer {
     pub source_layer: Option<String>,
 }
 
+impl StyleLayer {
+    /// Whether the layer is shown at `zoom`: `minzoom <= zoom < maxzoom`, per the style spec.
+    pub fn visible_at(&self, zoom: f32) -> bool {
+        self.minzoom.is_none_or(|min| zoom >= f32::from(min))
+            && self.maxzoom.is_none_or(|max| zoom < f32::from(max))
+    }
+}
+
 impl Serialize for StyleLayer {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -675,5 +683,20 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod zoom_range_tests {
+    #[test]
+    fn visible_at_follows_style_spec() {
+        let layer: super::StyleLayer = serde_json::from_value(serde_json::json!({
+            "id": "l", "type": "line", "minzoom": 14, "maxzoom": 16, "paint": {}
+        }))
+        .unwrap();
+        assert!(!layer.visible_at(13.9));
+        assert!(layer.visible_at(14.0));
+        assert!(layer.visible_at(15.99));
+        assert!(!layer.visible_at(16.0));
     }
 }
