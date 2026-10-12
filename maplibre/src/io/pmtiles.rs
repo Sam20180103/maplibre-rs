@@ -50,6 +50,9 @@ pub enum TileType {
 pub struct Header {
     pub root_offset: u64,
     pub root_length: u64,
+    /// JSON metadata, compressed with `internal_compression`.
+    pub metadata_offset: u64,
+    pub metadata_length: u64,
     pub leaf_offset: u64,
     pub data_offset: u64,
     pub internal_compression: Compression,
@@ -82,6 +85,8 @@ impl Header {
         Ok(Header {
             root_offset: u64_at(8),
             root_length: u64_at(16),
+            metadata_offset: u64_at(24),
+            metadata_length: u64_at(32),
             leaf_offset: u64_at(40),
             data_offset: u64_at(56),
             internal_compression: compression(bytes[97]),
@@ -200,7 +205,7 @@ pub fn tile_id(z: u8, x: u32, y: u32) -> u64 {
     (n * n - 1) / 3 + d
 }
 
-fn decompress(compression: Compression, data: Vec<u8>) -> Result<Vec<u8>, PmTilesError> {
+pub fn decompress(compression: Compression, data: Vec<u8>) -> Result<Vec<u8>, PmTilesError> {
     match compression {
         Compression::None | Compression::Unknown => Ok(data),
         Compression::Gzip => {
@@ -228,6 +233,16 @@ pub struct PmTiles<R> {
 }
 
 impl<R: RangeReader> PmTiles<R> {
+    /// The archive's JSON metadata (e.g. `vector_layers`).
+    pub async fn metadata(&self) -> Result<String, PmTilesError> {
+        let bytes = self
+            .reader
+            .read(self.header.metadata_offset, self.header.metadata_length)
+            .await?;
+        String::from_utf8(decompress(self.header.internal_compression, bytes)?)
+            .map_err(|e| PmTilesError::Read(e.to_string()))
+    }
+
     pub async fn open(reader: R) -> Result<Self, PmTilesError> {
         let header = Header::parse(&reader.read(0, HEADER_LEN).await?)?;
         let root =
@@ -322,6 +337,7 @@ mod tests {
         let mut buffer = Cursor::new(Vec::new());
         let mut writer = pmtiles::PmTilesWriter::new(pmtiles::TileType::Mvt)
             .max_zoom(max_zoom)
+            .metadata(r#"{"vector_layers":[{"id":"test"}]}"#)
             .bounds(-10.0, -20.0, 30.0, 40.5)
             .create(&mut buffer)
             .unwrap();
@@ -357,6 +373,10 @@ mod tests {
         assert_eq!(archive.header.tile_type, TileType::Mvt);
         assert_eq!(archive.header.max_zoom, 3);
         assert_eq!(archive.header.bounds, [-10.0, -20.0, 30.0, 40.5]);
+        assert_eq!(
+            ready(archive.metadata()).unwrap(),
+            r#"{"vector_layers":[{"id":"test"}]}"#
+        );
         for (z, x, y) in [(0, 0, 0), (1, 1, 0), (3, 5, 2), (3, 7, 7)] {
             assert_eq!(
                 ready(archive.tile(z, x, y)).unwrap(),
