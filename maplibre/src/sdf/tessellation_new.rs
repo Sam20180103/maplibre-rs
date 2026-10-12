@@ -297,13 +297,9 @@ impl PropertyProcessor for TextTessellatorNew {
         name: &str,
         value: &ColumnValue,
     ) -> geozero::error::Result<bool> {
-        if name == self.text_field {
-            match value {
-                ColumnValue::String(str) => {
-                    self.current_text = Some(str.to_string());
-                }
-                _ => {}
-            }
+        // Numbers (e.g. a peak's elevation) are labeled too, formatted as text.
+        if name == self.text_field && !matches!(value, ColumnValue::Binary(_)) {
+            self.current_text = Some(value.to_string());
         }
         Ok(true)
     }
@@ -340,5 +336,25 @@ impl FeatureProcessor for TextTessellatorNew {
         };
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod text_field_tests {
+    use geozero::{ColumnValue, PropertyProcessor};
+
+    use super::TextTessellatorNew;
+
+    #[test]
+    fn numeric_text_field() {
+        let mut tessellator = TextTessellatorNew::new("elevation".to_string());
+        tessellator
+            .property(0, "elevation", &ColumnValue::Long(1586))
+            .unwrap();
+        assert_eq!(tessellator.current_text.as_deref(), Some("1586"));
+        tessellator
+            .property(0, "name", &ColumnValue::String("船底顶"))
+            .unwrap();
+        assert_eq!(tessellator.current_text.as_deref(), Some("1586"));
     }
 }
