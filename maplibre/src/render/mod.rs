@@ -170,8 +170,31 @@ impl Renderer {
     where
         MW: MapWindow + HeadedMapWindow,
     {
+        let backends = wgpu_settings.backends.unwrap_or(wgpu::Backends::all());
+
+        // A browser may expose `navigator.gpu` yet provide no adapter, and wgpu then never tries
+        // WebGL. Probe before the surface claims the canvas: a canvas holds one context type only.
+        #[cfg(target_arch = "wasm32")]
+        let backends = {
+            let both = wgpu::Backends::BROWSER_WEBGPU | wgpu::Backends::GL;
+            if backends.contains(both)
+                && wgpu::Instance::new(wgpu::InstanceDescriptor {
+                    backends: wgpu::Backends::BROWSER_WEBGPU,
+                    ..Default::default()
+                })
+                .request_adapter(&wgpu::RequestAdapterOptions::default())
+                .await
+                .is_none()
+            {
+                log::warn!("No WebGPU adapter available, falling back to WebGL");
+                backends.difference(wgpu::Backends::BROWSER_WEBGPU)
+            } else {
+                backends
+            }
+        };
+
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu_settings.backends.unwrap_or(wgpu::Backends::all()),
+            backends,
             flags: Default::default(),
             dx12_shader_compiler: Default::default(),
             gles_minor_version: Default::default(),
