@@ -153,7 +153,7 @@ pub async fn run_map<ET: MapEvent + Clone + PartialEq + Debug>(
             Box::<maplibre::background::BackgroundPlugin>::default(),
             Box::<maplibre::vector::VectorPlugin<platform::UsedVectorTransferables>>::default(),
             Box::new(maplibre::sdf::SdfPlugin::<platform::UsedVectorTransferables>::default()),
-            // Box::new(RasterPlugin::<platform::UsedRasterTransferables>::default()),
+            Box::<maplibre::raster::RasterPlugin<platform::UsedRasterTransferables>>::default(),
             #[cfg(all(debug_assertions, feature = "debug-overlay"))]
             Box::<maplibre::debug::DebugPlugin>::default(),
         ],
