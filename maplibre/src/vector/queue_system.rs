@@ -17,7 +17,12 @@ use crate::{
     },
 };
 
-pub fn queue_system(MapContext { world, .. }: &mut MapContext) -> SystemResult {
+pub fn queue_system(
+    MapContext {
+        world, view_state, ..
+    }: &mut MapContext,
+) -> SystemResult {
+    let zoom = view_state.zoom().level();
     let Some((
         Initialized(tile_view_pattern),
         Initialized(buffer_pool),
@@ -48,7 +53,10 @@ pub fn queue_system(MapContext { world, .. }: &mut MapContext) -> SystemResult {
             });
 
             if let Some(layer_entries) = buffer_pool_index.get_layers(source_shape.coords()) {
-                for layer_entry in layer_entries {
+                for layer_entry in layer_entries
+                    .iter()
+                    .filter(|entry| entry.style_layer.visible_at(zoom))
+                {
                     // Choose fill vs line pipeline based on layer type
                     let is_line = layer_entry.style_layer.type_ == "line";
                     let draw_function: Box<dyn crate::render::render_phase::Draw<LayerItem>> =
