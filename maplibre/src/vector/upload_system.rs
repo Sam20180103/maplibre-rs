@@ -10,7 +10,10 @@ use crate::{
         view_state::ViewStatePadding,
         Renderer,
     },
-    style::{layer::LayerPaint, Style},
+    style::{
+        layer::{LayerPaint, StyleLayer},
+        Style,
+    },
     tcs::{
         system::{SystemError, SystemResult},
         tiles::Tiles,
@@ -53,9 +56,48 @@ pub fn upload_system(
             view_region,
             zoom,
         );
+        if view_state.did_zoom_change() {
+            update_line_widths(buffer_pool, queue, view_region, zoom);
+        }
     }
 
     Ok(())
+}
+
+/// The layer's line-width at `zoom` (default 1.0px).
+fn line_width(style_layer: &StyleLayer, zoom: f32) -> f32 {
+    match &style_layer.paint {
+        Some(LayerPaint::Line(paint)) => paint
+            .line_width
+            .as_ref()
+            .map(|w| w.evaluate_at_zoom(zoom))
+            .unwrap_or(1.0),
+        _ => 1.0,
+    }
+}
+
+/// Line widths can depend on zoom; refresh them for layers already uploaded.
+fn update_line_widths(
+    buffer_pool: &VectorBufferPool,
+    queue: &wgpu::Queue,
+    view_region: &ViewRegion,
+    zoom: f32,
+) {
+    for coords in view_region.iter() {
+        let Some(entries) = buffer_pool.index().get_layers(coords) else {
+            continue;
+        };
+        for entry in entries
+            .iter()
+            .filter(|entry| matches!(entry.style_layer.paint, Some(LayerPaint::Line(_))))
+        {
+            let metadata = ShaderLayerMetadata {
+                z_index: entry.style_layer.index as f32,
+                line_width: line_width(&entry.style_layer, zoom),
+            };
+            buffer_pool.update_layer_metadata(queue, entry, metadata);
+        }
+    }
 }
 
 fn upload_tessellated_layer(
@@ -137,15 +179,7 @@ fn upload_tessellated_layer(
                 continue;
             }
 
-            // Extract line-width from style paint (default 1.0px)
-            let line_width = match &style_layer.paint {
-                Some(LayerPaint::Line(paint)) => paint
-                    .line_width
-                    .as_ref()
-                    .map(|w| w.evaluate_at_zoom(zoom))
-                    .unwrap_or(1.0),
-                _ => 1.0,
-            };
+            let line_width = line_width(style_layer, zoom);
 
             log::debug!("Allocating geometry at {coords}");
             buffer_pool.allocate_layer_geometry(
