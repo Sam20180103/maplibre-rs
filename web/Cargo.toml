@@ -15,7 +15,10 @@ authors.workspace = true
 [features]
 web-webgl = ["maplibre/web-webgl"]
 trace = ["maplibre/trace", "tracing-wasm"]
-default = []
+default = ["start"]
+# Registers `wasm_bindgen_start` as the wasm start function. Disable when embedding into an
+# application that has its own start function.
+start = []
 
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = true
@@ -40,7 +43,7 @@ web-sys = { workspace = true, features = [
     "Window",
     "Worker", "WorkerGlobalScope", "DedicatedWorkerGlobalScope", "MessageEvent",
     "Request", "RequestInit", "RequestMode", "Response", "Headers",
-    "ErrorEvent"
+    "ErrorEvent", "WorkerOptions", "WorkerType"
 ] }
 js-sys.workspace = true
 wasm-bindgen.workspace = true
