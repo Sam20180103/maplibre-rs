@@ -3,7 +3,7 @@ use crate::{
     context::MapContext,
     coords::ViewRegion,
     raster::{
-        resource::RasterResources, AvailableRasterLayerData, RasterLayerData,
+        is_raster_layer, resource::RasterResources, AvailableRasterLayerData, RasterLayerData,
         RasterLayersDataComponent,
     },
     render::{
@@ -34,6 +34,7 @@ pub fn upload_system(
     else {
         return Err(SystemError::Dependencies);
     };
+    raster_resources.active = style.layers.iter().any(is_raster_layer);
     let view_region = view_state.create_view_region(
         view_state.zoom().zoom_level(DEFAULT_TILE_SIZE),
         ViewStatePadding::Loose,
@@ -71,9 +72,7 @@ fn upload_raster_layer(
             continue;
         };
 
-        for style_layer in &style.layers {
-            let style_source_layer = style_layer.source_layer.as_ref().unwrap(); // FIXME: Remove unwrap
-
+        for style_layer in style.layers.iter().filter(|layer| is_raster_layer(layer)) {
             let Some(AvailableRasterLayerData { coords, image, .. }) = raster_layers
                 .layers
                 .iter()
@@ -81,7 +80,7 @@ fn upload_raster_layer(
                     RasterLayerData::Available(data) => Some(data),
                     RasterLayerData::Missing(_) => None,
                 })
-                .find(|layer| style_source_layer.as_str() == layer.source_layer)
+                .find(|data| data.source_layer == style_layer.id)
             else {
                 continue;
             };
@@ -91,7 +90,9 @@ fn upload_raster_layer(
             let texture = raster_resources.create_texture(
                 None,
                 device,
-                wgpu::TextureFormat::Rgba8UnormSrgb,
+                // Not sRGB: tiles are drawn to a non-sRGB view, so the bytes must pass through
+                // unconverted, like the CSS colors of vector layers.
+                wgpu::TextureFormat::Rgba8Unorm,
                 width,
                 height,
                 wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,

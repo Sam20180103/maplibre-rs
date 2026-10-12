@@ -2,7 +2,7 @@
 
 use crate::{
     context::MapContext,
-    raster::render_commands::DrawRasterTiles,
+    raster::{is_raster_layer, render_commands::DrawRasterTiles},
     render::{
         eventually::{Eventually, Eventually::Initialized},
         render_commands::DrawMasks,
@@ -15,7 +15,22 @@ use crate::{
     },
 };
 
-pub fn queue_system(MapContext { world, .. }: &mut MapContext) -> SystemResult {
+pub fn queue_system(
+    MapContext {
+        world,
+        style,
+        view_state,
+        ..
+    }: &mut MapContext,
+) -> SystemResult {
+    // Tiles hold a single raster texture, drawn at the first raster layer's position.
+    let Some(raster_layer) = style.layers.iter().find(|layer| is_raster_layer(layer)) else {
+        return Ok(());
+    };
+    if !raster_layer.visible_at(view_state.zoom().level()) {
+        return Ok(());
+    }
+
     let Some((Initialized(tile_view_pattern),)) = world
         .resources
         .query::<(&Eventually<WgpuTileViewPattern>,)>()
@@ -35,9 +50,9 @@ pub fn queue_system(MapContext { world, .. }: &mut MapContext) -> SystemResult {
             items.push((
                 LayerItem {
                     draw_function: Box::new(DrawState::<LayerItem, DrawRasterTiles>::new()),
-                    index: 0,
+                    index: raster_layer.index,
                     is_line: false,
-                    style_layer: "raster".to_string(),
+                    style_layer: raster_layer.id.clone(),
                     tile: Tile {
                         coords: source_shape.coords(),
                     },

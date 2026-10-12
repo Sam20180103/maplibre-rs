@@ -94,3 +94,10 @@ pub struct RasterLayersDataComponent {
 }
 
 impl TileComponent for RasterLayersDataComponent {}
+
+fn is_raster_layer(layer: &crate::style::layer::StyleLayer) -> bool {
+    matches!(
+        layer.paint,
+        Some(crate::style::layer::LayerPaint::Raster(_))
+    )
+}
