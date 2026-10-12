@@ -5,7 +5,7 @@ use std::{fmt::Debug, marker::PhantomData};
 use instant::Instant;
 use maplibre::{
     environment::{Environment, OffscreenKernel},
-    event_loop::{EventLoop, EventLoopProxy, SendEventError},
+    event_loop::{EventLoop, EventLoopProxy, MapEvent, SendEventError},
     io::{apc::AsyncProcedureCall, scheduler::Scheduler, source_client::HttpClient},
     map::Map,
     window::{HeadedMapWindow, MapWindowConfig, PhysicalSize},
@@ -74,7 +74,7 @@ pub struct WinitEventLoop<ET: 'static> {
     event_loop: RawWinitEventLoop<ET>,
 }
 
-impl<ET: 'static + PartialEq + Debug> EventLoop<ET> for WinitEventLoop<ET> {
+impl<ET: MapEvent + PartialEq + Debug> EventLoop<ET> for WinitEventLoop<ET> {
     type EventLoopProxy = WinitEventLoopProxy<ET>;
 
     fn run<E>(self, mut map: Map<E>, max_frames: Option<u64>) -> Result<(), EventLoopError>
@@ -88,7 +88,7 @@ impl<ET: 'static + PartialEq + Debug> EventLoop<ET> for WinitEventLoop<ET> {
         let mut input_controller = InputController::new(0.2, 100.0, 0.1);
         let mut scale_factor = map.window().scale_factor();
 
-        let loop_ = move |event, window_target: &ActiveEventLoop| {
+        let loop_ = move |event: Event<ET>, window_target: &ActiveEventLoop| {
             #[cfg(target_os = "android")]
             if !map.is_initialized() && event == Event::Resumed {
                 use tokio::{runtime::Handle, task};
@@ -173,6 +173,13 @@ impl<ET: 'static + PartialEq + Debug> EventLoop<ET> for WinitEventLoop<ET> {
                                 }
                                 _ => {}
                             }
+                        }
+                    }
+
+                    Event::UserEvent(event) => {
+                        if let Ok(map_context) = map.context_mut() {
+                            event.apply(map_context);
+                            map.window().request_redraw();
                         }
                     }
 

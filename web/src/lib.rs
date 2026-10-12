@@ -1,15 +1,17 @@
 #![deny(unused_imports)]
 
+use std::fmt::Debug;
+
 use maplibre::{
     environment::{OffscreenKernel, OffscreenKernelConfig},
-    event_loop::EventLoop,
+    event_loop::{EventLoop, MapEvent},
     io::source_client::{HttpSourceClient, SourceClient},
     kernel::{Kernel, KernelBuilder},
     map::Map,
     render::builder::RendererBuilder,
     style::Style,
 };
-use maplibre_winit::{WinitEnvironment, WinitMapWindowConfig};
+use maplibre_winit::{WinitEnvironment, WinitEventLoopProxy, WinitMapWindowConfig};
 use wasm_bindgen::prelude::*;
 
 use crate::{
@@ -19,6 +21,9 @@ use crate::{
 
 mod error;
 mod platform;
+
+#[cfg(not(target_feature = "atomics"))]
+pub use platform::singlethreaded::wasm_entries::worker_factory;
 
 #[cfg(not(any(no_pendantic_os_check, target_arch = "wasm32")))]
 compile_error!("web works only on wasm32.");
@@ -36,7 +41,9 @@ fn enable_tracing() {
     );
 }
 
-#[wasm_bindgen(start)]
+/// Sets up logging and the panic hook. Runs automatically with the default `start` feature;
+/// embedders that provide their own start function disable it and call this instead.
+#[cfg_attr(feature = "start", wasm_bindgen(start))]
 pub fn wasm_bindgen_start() {
     if console_log::init_with_level(log::Level::Info).is_err() {
         // Failed to initialize logging. No need to log a message.
@@ -62,16 +69,16 @@ impl OffscreenKernel for WHATWGOffscreenKernelEnvironment {
 }
 
 #[cfg(not(target_feature = "atomics"))]
-type CurrentEnvironment = WinitEnvironment<
+type CurrentEnvironment<ET> = WinitEnvironment<
     maplibre::io::scheduler::NopScheduler,
     WHATWGFetchHttpClient,
     UsedOffscreenKernelEnvironment,
     platform::singlethreaded::apc::PassingAsyncProcedureCall,
-    (),
+    ET,
 >;
 
 #[cfg(target_feature = "atomics")]
-type CurrentEnvironment = WinitEnvironment<
+type CurrentEnvironment<ET> = WinitEnvironment<
     platform::multithreaded::pool_scheduler::WebWorkerPoolScheduler,
     WHATWGFetchHttpClient,
     UsedOffscreenKernelEnvironment,
@@ -79,15 +86,25 @@ type CurrentEnvironment = WinitEnvironment<
         UsedOffscreenKernelEnvironment,
         platform::multithreaded::pool_scheduler::WebWorkerPoolScheduler,
     >,
-    (),
+    ET,
 >;
 
-pub type MapType = Map<CurrentEnvironment>;
+pub type MapType = Map<CurrentEnvironment<()>>;
 
 #[wasm_bindgen]
 pub async fn run_maplibre(new_worker: js_sys::Function) -> Result<(), JSError> {
+    run_map::<()>("maplibre", new_worker).await.map(|_proxy| ())
+}
+
+/// Starts a map on the canvas with id `canvas_id` and returns a proxy for sending [`MapEvent`]s
+/// to it. `new_worker` creates the web workers that fetch and process tiles; in single-threaded
+/// builds [`worker_factory`] creates it from a worker script URL.
+pub async fn run_map<ET: MapEvent + Clone + PartialEq + Debug>(
+    canvas_id: &str,
+    new_worker: js_sys::Function,
+) -> Result<WinitEventLoopProxy<ET>, JSError> {
     let mut kernel_builder = KernelBuilder::new()
-        .with_map_window_config(WinitMapWindowConfig::new("maplibre".to_string()))
+        .with_map_window_config(WinitMapWindowConfig::new(canvas_id.to_string()))
         .with_http_client(WHATWGFetchHttpClient::default());
 
     let offscreen_kernel_config = OffscreenKernelConfig {
@@ -121,10 +138,10 @@ pub async fn run_maplibre(new_worker: js_sys::Function) -> Result<(), JSError> {
             .with_scheduler(maplibre::io::scheduler::NopScheduler);
     }
 
-    let kernel: Kernel<WinitEnvironment<_, _, UsedOffscreenKernelEnvironment, _, ()>> =
+    let kernel: Kernel<WinitEnvironment<_, _, UsedOffscreenKernelEnvironment, _, ET>> =
         kernel_builder.build();
 
-    let mut map: MapType = Map::new(
+    let mut map: Map<CurrentEnvironment<ET>> = Map::new(
         Style::default(),
         kernel,
         RendererBuilder::new(),
@@ -141,12 +158,14 @@ pub async fn run_maplibre(new_worker: js_sys::Function) -> Result<(), JSError> {
     .unwrap();
     map.initialize_renderer().await.unwrap();
 
-    map.window_mut()
+    let event_loop = map
+        .window_mut()
         .take_event_loop()
-        .expect("Event loop is not available")
-        .run(map, None);
+        .expect("Event loop is not available");
+    let proxy = event_loop.create_proxy();
+    event_loop.run(map, None);
 
-    Ok(())
+    Ok(proxy)
 }
 
 #[cfg(test)]
