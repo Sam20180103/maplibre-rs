@@ -18,6 +18,8 @@ pub enum ProcessRasterError {
 
 pub struct RasterTileRequest {
     pub coords: WorldTileCoords,
+    /// Id of the style layer the tile is for.
+    pub layer: String,
 }
 
 pub fn process_raster_tile<T: RasterTransferables, C: Context>(
@@ -26,10 +28,11 @@ pub fn process_raster_tile<T: RasterTransferables, C: Context>(
     context: &mut ProcessRasterContext<T, C>,
 ) -> Result<(), ProcessRasterError> {
     let coords = &tile_request.coords;
-    let img = image::load_from_memory(data).unwrap();
+    let img =
+        image::load_from_memory(data).map_err(|e| ProcessRasterError::Processing(Box::new(e)))?;
     let rgba = img.to_rgba8();
 
-    context.layer_raster_finished(coords, "raster".to_string(), rgba)?;
+    context.layer_raster_finished(coords, tile_request.layer, rgba)?;
 
     Ok(())
 }
@@ -79,6 +82,7 @@ mod tests {
             &[0],
             RasterTileRequest {
                 coords: (0, 0, ZoomLevel::default()).into(),
+                layer: "raster".to_string(),
             },
             &mut ProcessRasterContext::<DefaultRasterTransferables, _>::new(DummyContext),
         );

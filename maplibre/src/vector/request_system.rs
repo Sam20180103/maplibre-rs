@@ -1,6 +1,11 @@
 //! Requests tiles which are currently in view
 
-use std::{borrow::Cow, collections::HashSet, marker::PhantomData, rc::Rc};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+    rc::Rc,
+};
 
 use crate::{
     context::MapContext,
@@ -12,7 +17,11 @@ use crate::{
     kernel::Kernel,
     render::{tile_view_pattern::DEFAULT_TILE_SIZE, view_state::ViewStatePadding},
     sdf::SymbolLayersDataComponent,
-    style::layer::StyleLayer,
+    style::{
+        layer::{LayerPaint, StyleLayer},
+        source::Source,
+        Style,
+    },
     tcs::system::{System, SystemResult},
     vector::{
         process_vector::{process_vector_tile, ProcessVectorContext, VectorTileRequest},
@@ -56,6 +65,9 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
         );
 
         if view_state.did_camera_change() || view_state.did_zoom_change() {
+            // Without vector layers, tiles are complete as soon as they exist.
+            let has_vector_layers = style.layers.iter().any(is_vector_layer);
+
             if let Some(view_region) = &view_region {
                 // TODO: We also need to request tiles from layers above if we are over the maximum zoom level
 
@@ -77,8 +89,15 @@ impl<E: Environment, T: VectorTransferables> System for RequestSystem<E, T> {
                         .tiles
                         .spawn_mut(coords)
                         .unwrap()
-                        .insert(VectorLayerBucketComponent::default())
+                        .insert(VectorLayerBucketComponent {
+                            done: !has_vector_layers,
+                            ..Default::default()
+                        })
                         .insert(SymbolLayersDataComponent::default());
+
+                    if !has_vector_layers {
+                        continue;
+                    }
 
                     tracing::event!(tracing::Level::ERROR, %coords, "tile request started: {coords}");
                     log::info!("tile request started: {coords}");
@@ -116,13 +135,10 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
             return Err(ProcedureError::IncompatibleInput);
         };
 
-        let requested_layers: HashSet<StyleLayer> = style.layers.iter().cloned().collect();
-
         let client = kernel.source_client();
 
-        if !style.layers.is_empty() {
+        for (source, requested_layers) in vector_sources(&style) {
             let context = context.clone();
-            let source = SourceType::Tessellate(TessellateSource::default());
             match client.fetch(&coords, &source).await {
                 Ok(data) => {
                     let data = data.into_boxed_slice();
@@ -154,4 +170,40 @@ pub fn fetch_vector_apc<K: OffscreenKernel, T: VectorTransferables, C: Context +
 
         Ok(())
     })
+}
+
+fn is_vector_layer(layer: &StyleLayer) -> bool {
+    matches!(
+        layer.paint,
+        Some(LayerPaint::Fill(_) | LayerPaint::Line(_) | LayerPaint::Symbol(_))
+    )
+}
+
+/// Groups the style's vector layers by the tile source they are fetched from. Layers without a
+/// `source` use the default source.
+fn vector_sources(style: &Style) -> Vec<(SourceType, HashSet<StyleLayer>)> {
+    let mut groups: HashMap<Option<&str>, HashSet<StyleLayer>> = HashMap::new();
+    for layer in style.layers.iter().filter(|layer| is_vector_layer(layer)) {
+        groups
+            .entry(layer.source.as_deref())
+            .or_default()
+            .insert(layer.clone());
+    }
+
+    groups
+        .into_iter()
+        .filter_map(|(source_id, layers)| {
+            let source = match source_id {
+                None => SourceType::Tessellate(TessellateSource::default()),
+                Some(id) => match style.sources.get(id) {
+                    Some(Source::Vector(source)) => SourceType::from_style_source(source)?,
+                    _ => {
+                        log::warn!("vector layers use source {id}, which is not a vector source with tiles");
+                        return None;
+                    }
+                },
+            };
+            Some((source, layers))
+        })
+        .collect()
 }
