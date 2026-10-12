@@ -207,11 +207,25 @@ impl Surface {
         let capabilities = surface.get_capabilities(adapter);
         log::info!("adapter capabilities on surface: {capabilities:?}");
 
-        let texture_format = settings
+        let mut texture_format = settings
             .texture_format
             .or_else(|| capabilities.formats.first().cloned())
             .unwrap_or(wgpu::TextureFormat::Rgba8Unorm);
-        let render_format = strip_srgb(texture_format);
+        let mut render_format = strip_srgb(texture_format);
+        if !adapter
+            .get_downlevel_capabilities()
+            .flags
+            .contains(wgpu::DownlevelFlags::SURFACE_VIEW_FORMATS)
+        {
+            // Rendering through a differently-formatted view is unsupported (e.g. WebGL):
+            // use the non-sRGB format for the surface itself if offered, otherwise render
+            // to the surface format directly.
+            if capabilities.formats.contains(&render_format) {
+                texture_format = render_format;
+            } else {
+                render_format = texture_format;
+            }
+        }
         log::info!("surface format: {texture_format:?}, render format: {render_format:?}");
 
         let texture_format_features = adapter.get_texture_format_features(texture_format);
