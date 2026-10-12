@@ -133,7 +133,9 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
                 continue;
             };
 
+            // `None`: no tile here (an empty response, e.g. outside an offline archive).
             let result = match client.fetch(&coords, &source).await {
+                Ok(data) if data.is_empty() => Err(None),
                 Ok(data) => process_raster_tile(
                     &data,
                     RasterTileRequest {
@@ -142,11 +144,13 @@ pub fn fetch_raster_apc<K: OffscreenKernel, T: RasterTransferables, C: Context +
                     },
                     &mut ProcessRasterContext::<T, C>::new(context.clone()),
                 )
-                .map_err(|e| format!("{e:?}")),
-                Err(e) => Err(format!("{e:?}")),
+                .map_err(|e| Some(format!("{e:?}"))),
+                Err(e) => Err(Some(format!("{e:?}"))),
             };
-            if let Err(e) = result {
-                log::error!("raster tile {coords} of layer {} failed: {e}", layer.id);
+            if let Err(error) = result {
+                if let Some(e) = error {
+                    log::error!("raster tile {coords} of layer {} failed: {e}", layer.id);
+                }
                 context
                     .send_back(<T as RasterTransferables>::LayerRasterMissing::build_from(
                         coords,
