@@ -134,7 +134,7 @@ pub async fn run_maplibre(new_worker: js_sys::Function) -> Result<(), JSError> {
             Box::<maplibre::vector::VectorPlugin<platform::UsedVectorTransferables>>::default(),
             Box::new(maplibre::sdf::SdfPlugin::<platform::UsedVectorTransferables>::default()),
             // Box::new(RasterPlugin::<platform::UsedRasterTransferables>::default()),
-            #[cfg(debug_assertions)]
+            #[cfg(all(debug_assertions, feature = "debug-overlay"))]
             Box::<maplibre::debug::DebugPlugin>::default(),
         ],
     )
