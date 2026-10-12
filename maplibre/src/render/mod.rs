@@ -216,7 +216,7 @@ impl Renderer {
         )
         .await?;
 
-        let surface = Surface::from_surface(surface, &adapter, window, &settings);
+        let surface = Surface::from_surface(surface, &adapter, &device, window, &settings);
 
         match surface.head() {
             Head::Headed(window) => window.configure(&device),

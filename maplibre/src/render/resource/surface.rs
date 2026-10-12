@@ -190,19 +190,35 @@ pub enum Head {
 pub struct Surface {
     size: PhysicalSize,
     head: Head,
+    /// The device's `max_texture_dimension_2d`; `size` never exceeds it.
+    max_dimension: u32,
+}
+
+/// Scales `size` down, keeping the aspect ratio, so that neither side exceeds `max`.
+/// High-DPI phones can otherwise request surfaces larger than the device allows
+/// (e.g. 3246x5740 with WebGL's 4096 limit), which fails surface configuration.
+fn clamp_size(size: PhysicalSize, max: u32) -> PhysicalSize {
+    let longest = size.width().max(size.height());
+    if longest <= max {
+        return size;
+    }
+    let scale = |side: u32| ((side as u64 * max as u64 / longest as u64) as u32).max(1);
+    PhysicalSize::new(scale(size.width()), scale(size.height())).expect("sides are at least 1")
 }
 
 impl Surface {
     pub fn from_surface<MW>(
         surface: wgpu::Surface<'static>,
         adapter: &wgpu::Adapter,
+        device: &wgpu::Device,
         window: &MW,
         settings: &RendererSettings,
     ) -> Self
     where
         MW: MapWindow + HeadedMapWindow,
     {
-        let size = window.size();
+        let max_dimension = device.limits().max_texture_dimension_2d;
+        let size = clamp_size(window.size(), max_dimension);
 
         let capabilities = surface.get_capabilities(adapter);
         log::info!("adapter capabilities on surface: {capabilities:?}");
@@ -233,6 +249,7 @@ impl Surface {
 
         Self {
             size,
+            max_dimension,
             head: Head::Headed(WindowHead {
                 surface,
                 size,
@@ -288,6 +305,7 @@ impl Surface {
 
         Self {
             size,
+            max_dimension: device.limits().max_texture_dimension_2d,
             head: Head::Headless(Arc::new(BufferedTextureHead {
                 texture,
                 texture_format: format,
@@ -346,7 +364,7 @@ impl Surface {
     }
 
     pub fn resize(&mut self, size: PhysicalSize) {
-        self.size = size;
+        self.size = clamp_size(size, self.max_dimension);
     }
 
     pub fn reconfigure(&mut self, device: &wgpu::Device) {
@@ -419,5 +437,18 @@ impl HasChanged for WindowHead {
 
     fn has_changed(&self, criteria: &Self::Criteria) -> bool {
         self.size.width() != criteria.0 || self.size.height() != criteria.1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamp_size_keeps_aspect_within_limit() {
+        let size = |w, h| PhysicalSize::new(w, h).unwrap();
+        assert_eq!(clamp_size(size(800, 600), 4096), size(800, 600));
+        assert_eq!(clamp_size(size(3246, 5740), 4096), size(2316, 4096));
+        assert_eq!(clamp_size(size(10000, 1), 4096), size(4096, 1));
     }
 }
