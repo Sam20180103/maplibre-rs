@@ -93,14 +93,17 @@ pub type MapType = Map<CurrentEnvironment<()>>;
 
 #[wasm_bindgen]
 pub async fn run_maplibre(new_worker: js_sys::Function) -> Result<(), JSError> {
-    run_map::<()>("maplibre", new_worker).await.map(|_proxy| ())
+    run_map::<()>("maplibre", Style::default(), new_worker)
+        .await
+        .map(|_proxy| ())
 }
 
-/// Starts a map on the canvas with id `canvas_id` and returns a proxy for sending [`MapEvent`]s
-/// to it. `new_worker` creates the web workers that fetch and process tiles; in single-threaded
+/// Starts a map with `style` on the canvas with id `canvas_id` and returns a proxy for sending
+/// [`MapEvent`]s to it. `new_worker` creates the web workers that fetch and process tiles; in single-threaded
 /// builds [`worker_factory`] creates it from a worker script URL.
 pub async fn run_map<ET: MapEvent + Clone + PartialEq + Debug>(
     canvas_id: &str,
+    style: Style,
     new_worker: js_sys::Function,
 ) -> Result<WinitEventLoopProxy<ET>, JSError> {
     let mut kernel_builder = KernelBuilder::new()
@@ -142,7 +145,7 @@ pub async fn run_map<ET: MapEvent + Clone + PartialEq + Debug>(
         kernel_builder.build();
 
     let mut map: Map<CurrentEnvironment<ET>> = Map::new(
-        Style::default(),
+        style,
         kernel,
         RendererBuilder::new(),
         vec![
