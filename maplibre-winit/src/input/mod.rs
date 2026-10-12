@@ -21,6 +21,8 @@ mod shift_handler;
 mod zoom_handler;
 
 pub struct InputController {
+    /// Active touches by id, in logical window coordinates.
+    touches: Vec<(u64, Vector2<f64>)>,
     pinch_handler: PinchHandler,
     pan_handler: PanHandler,
     zoom_handler: ZoomHandler,
@@ -43,6 +45,7 @@ impl InputController {
     ///
     pub fn new(speed: f64, sensitivity: f64, zoom_sensitivity: f64) -> Self {
         Self {
+            touches: Vec::new(),
             pinch_handler: PinchHandler::default(),
             pan_handler: PanHandler::default(),
             zoom_handler: ZoomHandler::new(zoom_sensitivity),
@@ -81,30 +84,28 @@ impl InputController {
                     || self.debug_handler.process_key_press(logical_key, *state)
                     || self.zoom_handler.process_key_press(logical_key, *state)
             }
-            WindowEvent::Touch(touch) => match touch.phase {
-                TouchPhase::Started => {
-                    let position: (f64, f64) = touch.location.to_owned().into();
-                    self.pan_handler
-                        .process_touch_start(&Vector2::from(position));
-                    self.query_handler.process_touch_start();
-                    true
+            WindowEvent::Touch(touch) => {
+                let position: (f64, f64) = touch.location.to_owned().into();
+                let position = Vector2::from(position) / scale_factor;
+                match touch.phase {
+                    TouchPhase::Started => {
+                        self.touches.push((touch.id, position));
+                        self.query_handler.process_touch_start();
+                    }
+                    TouchPhase::Moved => {
+                        if let Some(entry) = self.touches.iter_mut().find(|(id, _)| *id == touch.id)
+                        {
+                            entry.1 = position;
+                        }
+                    }
+                    TouchPhase::Ended | TouchPhase::Cancelled => {
+                        self.touches.retain(|(id, _)| *id != touch.id);
+                        self.query_handler.process_touch_end();
+                    }
                 }
-                TouchPhase::Ended => {
-                    self.pan_handler.process_touch_end();
-                    self.query_handler.process_touch_end();
-                    true
-                }
-                TouchPhase::Moved => {
-                    let position: (f64, f64) = touch.location.to_owned().into();
-                    let position = Vector2::from(position) / scale_factor;
-                    self.pan_handler.process_window_position(&position, true);
-                    self.query_handler.process_window_position(&position, true);
-                    self.zoom_handler.process_window_position(&position, true);
-                    self.camera_handler.process_window_position(&position, true);
-                    true
-                }
-                TouchPhase::Cancelled => false,
-            },
+                self.dispatch_touches(touch.phase == TouchPhase::Moved);
+                true
+            }
             WindowEvent::MouseWheel { delta, .. } => {
                 self.shift_handler.process_scroll(delta);
                 self.zoom_handler.process_scroll(delta);
@@ -117,6 +118,39 @@ impl InputController {
                 true
             }
             _ => false,
+        }
+    }
+}
+
+impl InputController {
+    /// One finger pans, two fingers pinch. `moved` is false when the set of fingers changed, in
+    /// which case the remaining gesture restarts from the current positions to avoid jumps.
+    fn dispatch_touches(&mut self, moved: bool) {
+        match self.touches.as_slice() {
+            [] => {
+                self.pan_handler.process_touch_end();
+                self.pinch_handler.process_touch_end();
+            }
+            [(_, position)] => {
+                let position = *position;
+                self.pinch_handler.process_touch_end();
+                if !moved {
+                    self.pan_handler.process_touch_end();
+                    self.pan_handler.process_touch_start(&position);
+                }
+                self.pan_handler.process_window_position(&position, true);
+                self.query_handler.process_window_position(&position, true);
+                self.zoom_handler.process_window_position(&position, true);
+                self.camera_handler.process_window_position(&position, true);
+            }
+            [(_, a), (_, b), ..] => {
+                let (a, b) = (*a, *b);
+                self.pan_handler.process_touch_end();
+                if !moved {
+                    self.pinch_handler.process_touch_end();
+                }
+                self.pinch_handler.process_touches(a, b);
+            }
         }
     }
 }
