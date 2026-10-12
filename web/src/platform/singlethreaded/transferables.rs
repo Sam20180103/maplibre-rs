@@ -385,7 +385,7 @@ impl LayerRaster for FlatBufferTransferable {
         let image_data = data.image_data().unwrap().iter().collect();
         AvailableRasterLayerData {
             coords: LayerRaster::coords(&self),
-            source_layer: "raster".to_owned(),
+            source_layer: data.layer_name().unwrap_or_default().to_owned(),
             image: RgbaImage::from_vec(data.width(), data.height(), image_data).unwrap(),
         }
     }
