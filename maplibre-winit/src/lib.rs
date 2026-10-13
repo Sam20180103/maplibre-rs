@@ -178,8 +178,10 @@ impl<ET: MapEvent + PartialEq + Debug> EventLoop<ET> for WinitEventLoop<ET> {
 
                     Event::UserEvent(event) => {
                         if let Ok(map_context) = map.context_mut() {
+                            // No request_redraw(): the map redraws every frame anyway, and on the
+                            // web each request postpones the pending frame, so events sent every
+                            // frame (e.g. to track a marker) would starve rendering and input.
                             event.apply(map_context);
-                            map.window().request_redraw();
                         }
                     }
 
