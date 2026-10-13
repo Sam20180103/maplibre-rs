@@ -206,6 +206,17 @@ impl ViewState {
         log::info!("zoom: {new_zoom}");
     }
 
+    /// Window position (logical pixels, origin top left) of a geographic point, e.g. to place
+    /// UI markers over the map.
+    pub fn lat_lon_to_window(&self, lat_lon: LatLon) -> Vector2<f64> {
+        let world = WorldCoords::from_lat_lon(lat_lon, self.zoom());
+        let clip = self
+            .view_projection()
+            .project(Vector4::new(world.x, world.y, 0.0, 1.0));
+        let window = self.clip_to_window(&clip);
+        Vector2::new(window.x, window.y)
+    }
+
     /// Centers the camera on `lat_lon` at `zoom`.
     pub fn jump_to(&mut self, lat_lon: LatLon, zoom: Zoom) {
         let position = WorldCoords::from_lat_lon(lat_lon, zoom);
@@ -487,6 +498,30 @@ mod tests {
         render::view_state::ViewState,
         window::PhysicalSize,
     };
+
+    #[test]
+    fn lat_lon_to_window_centers_jump_target() {
+        let mut state = ViewState::new(
+            PhysicalSize::new(800, 600).unwrap(),
+            WorldCoords::at_ground(0.0, 0.0),
+            Zoom::new(10.0),
+            Deg(0.0),
+            Deg(60.0),
+        );
+        let target = crate::coords::LatLon::new(24.4815, 113.2611);
+        state.jump_to(target, Zoom::new(15.0));
+        let center = state.lat_lon_to_window(target);
+        assert!(
+            (center.x - 400.0).abs() < 0.5 && (center.y - 300.0).abs() < 0.5,
+            "{center:?}"
+        );
+        // North is up, east is right.
+        let north_east = state.lat_lon_to_window(crate::coords::LatLon::new(24.49, 113.27));
+        assert!(
+            north_east.x > 400.0 && north_east.y < 300.0,
+            "{north_east:?}"
+        );
+    }
 
     #[test]
     fn conform_transformation() {
